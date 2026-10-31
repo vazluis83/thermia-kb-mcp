@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "thermia-kb-mcp"
+version = "0.1.0"
+description = "MCP server with a technical knowledge base for the Thermia Duo 12 (400 V) ground-source heat pump: wiring, terminals, settings, EXT bus registers and ESP32 integration."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["mcp>=2.3,<3", "pypdfium2>=4.30", "pillow>=10"]
+keywords = ["mcp", "thermia", "heat-pump", "esphome", "esp32", "home-assistant"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "anyio>=4"]
+
+[project.scripts]
+thermia-kb-mcp = "thermia_kb_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/thermia_kb_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
