@@ -46,13 +46,13 @@ Resource: `kb://en`, `kb://pt` – the complete knowledge base. `lang` is `en` (
 Requires Python ≥ 3.10. The easiest way is [uv](https://docs.astral.sh/uv/), which runs it straight from GitHub:
 
 ```sh
-uvx --from git+https://github.com/OWNER/thermia-kb-mcp thermia-kb-mcp
+uvx --from git+https://github.com/vazluis83/thermia-kb-mcp thermia-kb-mcp
 ```
 
 **Claude Code**
 
 ```sh
-claude mcp add thermia-kb -- uvx --from git+https://github.com/OWNER/thermia-kb-mcp thermia-kb-mcp
+claude mcp add thermia-kb -- uvx --from git+https://github.com/vazluis83/thermia-kb-mcp thermia-kb-mcp
 ```
 
 **Claude Desktop / other clients using a JSON config**
@@ -62,7 +62,7 @@ claude mcp add thermia-kb -- uvx --from git+https://github.com/OWNER/thermia-kb-
   "mcpServers": {
     "thermia-kb": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/OWNER/thermia-kb-mcp", "thermia-kb-mcp"]
+      "args": ["--from", "git+https://github.com/vazluis83/thermia-kb-mcp", "thermia-kb-mcp"]
     }
   }
 }
@@ -71,7 +71,7 @@ claude mcp add thermia-kb -- uvx --from git+https://github.com/OWNER/thermia-kb-
 **Without uv**
 
 ```sh
-pip install git+https://github.com/OWNER/thermia-kb-mcp
+pip install git+https://github.com/vazluis83/thermia-kb-mcp
 thermia-kb-mcp                                   # stdio
 thermia-kb-mcp --http --host 0.0.0.0 --port 8000 # streamable HTTP at http://HOST:8000/mcp
 ```
