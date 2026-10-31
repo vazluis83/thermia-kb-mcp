@@ -973,6 +973,40 @@ Fonte: mapa TIQ, usado pelo REPO-T. ✅ = confirmado num Duo real pelo REPO-T; o
 
 O REPO-T expõe: r32, r33 (select), r34–r39, r3A, r3C, r44, r54, r51, r52; tudo o resto através de `registers:` / `set_registers:` com os seus próprios mín./máx. **A escrita em r01 (temperatura interior) é ignorada pela bomba.** Alterar uma definição de cada vez, com o ecrã à mão.
 
+### 21.6 Notas de implementação a partir do código esphome-thermia [comunidade, REPO-T @ ab88ec7]
+
+A partir de `components/thermia/thermia_slave.h/.cpp`, `thermia.cpp`, `thermia_bus_gate.h` e `docs/crash-analysis.md`. Interessam se escrever o seu próprio firmware em vez de usar o componente.
+
+**Temporização do barramento**
+- A bomba faz um ciclo de interrogação a cada **110 ms** aproximadamente: ping → lê um byte de nós → (trama de dados). Relógio ≈ **20 kHz**. Cada ciclo tem cerca de 90 bits, incluindo as interrogações da própria bomba aos endereços alheios **0x32** e **0x37**.
+- A transação legítima mais longa é o endereço mais até 8 bytes lidos, cerca de 81 bits, ou seja ≈8 ms mesmo a metade da velocidade. O REPO-T usa um timeout de **1,5 ms por flanco** e um orçamento de **8 ms por transação**. O orçamento é verificado em todos os ciclos: com ruído no barramento durante o arranque do compressor, uma única chamada da ISR chegou a ficar ocupada 312 ms antes desta correção.
+- O REPO-T considera a ligação em baixo após **5 s** sem ping. Após **50 transações falhadas seguidas** suspende a ISR e volta a tentar após **10 s**.
+
+**Lado de leitura (respondemos à leitura de 1 byte da bomba)**
+- Responder `0xFF` = nada, `0x00–0x7F` = pedir esse registo, ou `[reg|0x80, lo, hi]` = escrita. Preencher com `0xFF` qualquer byte extra que o mestre leia. Um NACK do mestre termina a leitura.
+- A bomba responde com uma escrita de 3 bytes `[reg, lo, hi]`. Pode chegar qualquer registo, não só o pedido, por isso guardar tudo.
+- Alguns registos só respondem após muitos pings. Numa Duo são **r00/r01 e r32/r34**. Com 3 tentativas por registo nunca chegavam; com **50 tentativas** a percentagem de pings sem resposta desceu de ~25 % para ~0,5 %. A ponte Arduino do rainisto simplesmente continua a pedir até o registo chegar.
+- O r10 não é respondido enquanto o compressor está parado.
+
+**Escritas**
+- Uma escrita é oferecida em até **3** respostas de leitura consecutivas. "Entregue" significa apenas que os 3 bytes foram transmitidos sem erro de barramento; não há confirmação de que a bomba aplicou o valor.
+- As escritas seguem "a última ganha", sem fila.
+- Depois de uma escrita, tratar o valor em cache como **ultrapassado** até a bomba voltar a reportar esse registo (pode demorar minutos). Mostrar o valor antigo entretanto parece uma reversão.
+- O r33 aceita valores 0–16, mas só 0–4 estão documentados (Off, Auto, Heatpump only, Heater only, Hot water only). Não escrever 5–16.
+- A escrita do r01 (temperatura interior) é ignorada. Sem sensor de ambiente, a bomba assume um valor constante de ≈20 °C para o r01 [REPO-R docs/CONTEXT.md].
+
+**Detalhes de hardware do ESP**
+- O SDA é uma saída de dreno aberto (ESP32: pad de dreno aberto por hardware). O SCL é só entrada e nunca é forçado.
+- O escravo I2C por hardware do ESP32 não pode ser usado, porque a resposta depende do ping acabado de receber e já teria de estar no FIFO de transmissão.
+- Autoteste: no arranque, puxar o SDA a nível baixo durante 30 µs, três vezes, e medir o tempo de subida. Deteta linhas trocadas, em curto-circuito ou desligadas.
+- As temperaturas são int16 com sinal, em graus inteiros, exceto r01/r02 e r03/r04, em que as décimas estão no segundo registo. Janela de plausibilidade: −60…200 °C.
+
+**Robustez do firmware**
+- Ativar a interrupção do barramento só depois de o Wi-Fi estar ligado há **5 s**, e desativá-la quando o Wi-Fi cair. Num ESP8266 com sinal fraco (≈ −79 dBm), o tráfego do barramento durante a associação impedia o dispositivo de entrar na rede.
+- Os chips de núcleo único (ESP8266, ESP32-C3/C6/S2) partilham o CPU entre a interrogação do barramento e o Wi-Fi. Um ESP32/S3 de dois núcleos corre o loop e a ISR do ESPHome no núcleo 1 e o Wi-Fi no núcleo 0, por isso é preferível.
+- **As atualizações OTA por vezes bloquearam o ESP32-S3** com os componentes EXT e de sensor de ambiente: 2 em ~7 tentativas, resolvido só desligando e voltando a ligar a alimentação; o firmware em funcionamento não foi afetado. Causa suspeita: interrupções do barramento/RMT durante o apagamento da flash. Correção sugerida: parar ambos em `ota: on_begin`. Convém prever isto, porque um ESP bloqueado obriga a ir à bomba.
+- ESP8266 junto à bomba: `wifi: output_power: 20dB` evitou reinícios "Soft WDT" no SDK de Wi-Fi.
+
 ---
 
 ## 22. Protocolo da porta do sensor de ambiente (303–304) [comunidade, REPO-R]
@@ -987,6 +1021,21 @@ O REPO-T expõe: r32, r33 (select), r34–r39, r3A, r3C, r44, r54, r51, r52; tud
 - Família compatível: Diplomat, Diplomat Optimum, Duo, Legend; Danfoss DHP-H/C/L. Requer um ESP32 (periférico RMT).
 
 Exemplos: ambiente 20.5 / consigna 21.0 → raw `1|10101011|11010111|0101|00100|011`; ambiente 22.4 / consigna 21.5 → `1|00101011|10010111|1101|01100|011`.
+
+### 22.1 Medições no terreno e pontos em aberto [comunidade, REPO-R docs]
+
+A partir de `docs/room_sensor_context.md` e `docs/CONTEXT.md`.
+
+- Medido com multímetro numa bomba em funcionamento: porta do sensor de ambiente em repouso a **26–27 V DC**; com ≈1 kΩ aos terminais (teste com PT1000), ≈ **10 V**. Uma afirmação anterior de "5 V AC", vinda de um resumo de blogue, estava errada.
+- O esquema oficial desenha a porta do sensor de ambiente sem o símbolo de resistência variável, ao contrário do sensor exterior. Isto é coerente com tratar-se de uma porta digital ([ELEC p.40], 303/304).
+- A temporização dos impulsos foi medida em capturas: impulso 60,0 ms (σ 5,4 ms, n = 29), intervalo curto 82,3 ms, intervalo longo 388,3 ms. A razão longo/curto é ≈3,15, que não é inteira.
+- **Intervalo entre tramas:** com 2 s surgiu ocasionalmente uma temperatura ambiente sem sentido (92 °C); com **4 s** isso não foi observado. 4 s é o valor por omissão e o recomendado.
+- **Ainda não verificado numa bomba:** valores de consigna com meio grau (ex. 21,5 °C), embora a fórmula os cubra. Também por verificar: o sentido bomba → sensor (o 086U6003 original tem LCD e botões, por isso a bomba provavelmente envia-lhe dados) e o intervalo entre tramas do sensor original.
+- Um valor de consigna abaixo de **16 °C** faz a bomba gerar o alarme do sensor de ambiente (observação do utilizador, 2026-10-10).
+- Andar de receção opcional para escutar o sentido bomba → sensor: um optoacoplador (ex. PC817) do lado dos 27 V, com a saída do transístor puxada para 3,3 V num GPIO livre. Não é necessário para a emulação.
+- O acessório ROOM2 da própria ThermIQ só envia a temperatura ambiente (INDR_T); o valor de consigna passa pelo r32 através do EXT.
+- Nas bombas Danfoss DHP o sensor de ambiente ativa-se em HUOLTO → ASENNUS → JÄRJESTELMÄ (serviço → instalação → sistema) e o fator de ambiente vai de 0 a 4. Na Duo, o ROOM FACTOR aparece no menu HEAT CURVE quando é detetada uma unidade de ambiente [INST p.36].
+- O sensor original 086U6003 custa cerca de 100–200 € (relato de fórum).
 
 ---
 

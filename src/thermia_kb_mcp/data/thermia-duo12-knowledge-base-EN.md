@@ -969,6 +969,40 @@ Source: TIQ map, used by REPO-T. ✅ = confirmed on a real Duo by REPO-T; others
 
 REPO-T exposes: r32, r33 (select), r34–r39, r3A, r3C, r44, r54, r51, r52; everything else via `registers:` / `set_registers:` with your own min/max. **Writing r01 (indoor temperature) is ignored by the pump.** Change one setting at a time, with the display at hand.
 
+### 21.6 Implementation notes from the esphome-thermia source [community, REPO-T @ ab88ec7]
+
+From `components/thermia/thermia_slave.h/.cpp`, `thermia.cpp`, `thermia_bus_gate.h` and `docs/crash-analysis.md`. They matter if you write your own firmware instead of using the component.
+
+**Bus timing**
+- The pump runs one polling cycle about every **110 ms**: ping → read one byte from us → (data frame). Clock ≈ **20 kHz**. Each cycle has about 90 bits, including the pump's own polls of foreign addresses **0x32** and **0x37**.
+- The longest legitimate transaction is the address plus up to 8 read bytes, about 81 bits, so ≈8 ms even at half speed. REPO-T uses a **1.5 ms per-edge** timeout and an **8 ms per-transaction** budget. The budget is checked in every loop: a noisy bus during compressor start once kept a single ISR call busy for 312 ms before this fix.
+- REPO-T treats the link as down after **5 s** without a ping. After **50 consecutive failed transactions** it pauses its ISR and retries after **10 s**.
+
+**Read side (we answer the pump's 1-byte read)**
+- Answer `0xFF` = nothing, `0x00–0x7F` = request that register, or `[reg|0x80, lo, hi]` = write. Pad any extra bytes the master clocks with `0xFF`. A NACK from the master ends the read.
+- The pump answers with a 3-byte write `[reg, lo, hi]`. Any register can arrive, not only the one requested, so store everything.
+- Some registers answer only after many pings. On a Duo these are **r00/r01 and r32/r34**. With 3 tries per register they never arrived; with **50 tries** the share of unanswered pings fell from ~25 % to ~0.5 %. Rainisto's Arduino bridge simply keeps asking until the register arrives.
+- r10 is not answered while the compressor is idle.
+
+**Writes**
+- A write is offered on up to **3** consecutive read responses. "Delivered" means only that the 3 bytes were clocked out without a bus error; there is no confirmation that the pump applied the value.
+- Writes are last-one-wins, not queued.
+- After a write, treat the cached value as **superseded** until the pump reports that register again (this can take minutes). Showing the old value in the meantime looks like a revert.
+- r33 accepts values 0–16, but only 0–4 are documented (Off, Auto, Heatpump only, Heater only, Hot water only). Don't write 5–16.
+- Writing r01 (indoor temperature) is ignored. Without a room sensor the pump assumes a constant ≈20 °C for r01 [REPO-R docs/CONTEXT.md].
+
+**ESP hardware details**
+- SDA is an open-drain output (ESP32: hardware open-drain pad). SCL is input only and never driven.
+- The ESP32's hardware I2C slave can't be used, because the answer depends on the ping just received and would already have to be in the TX FIFO.
+- Self-test: pull SDA low for 30 µs three times at boot and measure the rise time. This detects swapped, shorted or unconnected lines.
+- Temperatures are signed int16 whole degrees, except r01/r02 and r03/r04, where the tenths are in the second register. Plausibility window: −60…200 °C.
+
+**Firmware robustness**
+- Attach the bus interrupt only after Wi-Fi has been up for **5 s**, and detach it when Wi-Fi drops. On an ESP8266 with weak signal (≈ −79 dBm), bus traffic during association kept the device off the network.
+- Single-core chips (ESP8266, ESP32-C3/C6/S2) share the CPU between bus polling and Wi-Fi. A dual-core ESP32/S3 runs ESPHome's loop and ISR on core 1, with Wi-Fi on core 0, so it is preferred.
+- **OTA updates sometimes hung the ESP32-S3** running both the EXT and room-sensor components: 2 of ~7 attempts, fixed only by a power cycle; running firmware unaffected. Suspected cause: bus/RMT interrupts during flash erase. Suggested fix: stop both in `ota: on_begin`. Plan for this, since a hung ESP means a trip to the pump.
+- ESP8266 next to the pump: `wifi: output_power: 20dB` avoided "Soft WDT" resets in the Wi-Fi SDK.
+
 ---
 
 ## 22. Room sensor port protocol (303–304) [community, REPO-R]
@@ -983,6 +1017,21 @@ REPO-T exposes: r32, r33 (select), r34–r39, r3A, r3C, r44, r54, r51, r52; ever
 - Compatible family: Diplomat, Diplomat Optimum, Duo, Legend; Danfoss DHP-H/C/L. Needs an ESP32 (RMT peripheral).
 
 Examples: room 20.5 / set 21.0 → raw `1|10101011|11010111|0101|00100|011`; room 22.4 / set 21.5 → `1|00101011|10010111|1101|01100|011`.
+
+### 22.1 Field measurements and open points [community, REPO-R docs]
+
+From `docs/room_sensor_context.md` and `docs/CONTEXT.md`.
+
+- Measured with a multimeter on a running pump: room-sensor port idle **26–27 V DC**; with ≈1 kΩ across it (a PT1000 test), ≈ **10 V**. An earlier "5 V AC" claim from a blog summary was wrong.
+- The official schematic draws the room-sensor port without a variable-resistor symbol, unlike the outdoor sensor. This is consistent with it being a digital port ([ELEC p.40], 303/304).
+- Pulse timing was measured from captures: mark 60.0 ms (σ 5.4 ms, n = 29), short space 82.3 ms, long space 388.3 ms. The long/short ratio is ≈3.15, which is not an integer.
+- **Frame gap:** 2 s occasionally produced a garbage room temperature (92 °C); at **4 s** this was not seen. 4 s is the default and is recommended.
+- **Not yet verified on a pump:** half-degree setpoints (e.g. 21.5 °C), although the formula covers them. Also unverified: the pump → sensor direction (the original 086U6003 has an LCD and buttons, so the pump probably sends it data), and the original sensor's frame gap.
+- A setpoint below **16 °C** makes the pump raise the room-sensor alarm (user observation, 2026-10-10).
+- Optional receive stage for sniffing the pump → sensor direction: an optocoupler (e.g. PC817) on the 27 V side, with its transistor output pulled up to 3.3 V on a free GPIO. It is not needed for emulation.
+- ThermIQ's own ROOM2 accessory only sends the room temperature (INDR_T); its setpoint goes through r32 over EXT.
+- On Danfoss DHP pumps the room sensor is enabled under HUOLTO → ASENNUS → JÄRJESTELMÄ (service → installation → system) and the room factor is 0–4. On the Duo, ROOM FACTOR appears in the HEAT CURVE menu once a room unit is detected [INST p.36].
+- The original sensor 086U6003 costs roughly €100–200 (forum report).
 
 ---
 
