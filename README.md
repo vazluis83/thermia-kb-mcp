@@ -94,6 +94,10 @@ The knowledge base itself is plain Markdown, so you can also read it directly or
 
 Page numbers in citations are **PDF page numbers**.
 
+## Contributing corrections
+
+The knowledge base changes only through reviewed issues. Nothing is learned or committed automatically. If you verified on your own unit that something is wrong or missing, open an issue with the [correction template](https://github.com/vazluis83/thermia-kb-mcp/issues/new/choose), saying how you verified it: measurement, display reading, register dump, or document and page. Models using the server are told to point users here only for verified findings.
+
 ## Development
 
 ```sh

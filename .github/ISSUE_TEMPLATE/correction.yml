@@ -1,0 +1,56 @@
+name: Correction or new finding
+description: Something in the knowledge base is wrong or missing, and you verified it.
+title: "[KB] "
+labels: ["knowledge-base"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping. Reports are reviewed before anything changes, so please include **how you verified it**.
+        Remember the pump runs on 400 V: never measure inside it live unless you are qualified to do so.
+  - type: input
+    id: model
+    attributes:
+      label: Heat pump model and variant
+      description: e.g. Duo Optimum 12 400 V 3N, Duo 10 standard, Diplomat 8. Add the type-plate details if you can.
+    validations:
+      required: true
+  - type: input
+    id: section
+    attributes:
+      label: Knowledge-base section
+      description: Section number, e.g. 6.1, 16.8, 21.5. Write "new" if it is not covered.
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: What the knowledge base says
+      description: Quote the line or table row, or write "not covered".
+    validations:
+      required: true
+  - type: textarea
+    id: finding
+    attributes:
+      label: What you found
+    validations:
+      required: true
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: How did you verify it?
+      options:
+        - Measured on my unit
+        - Read on the pump's display / observed behaviour
+        - Read over the EXT bus (register values)
+        - From a document (give the document and page below)
+        - Not verified yet (question / hypothesis)
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Evidence details
+      description: Values, photos, logs, register dumps, or document title and page number.
+    validations:
+      required: true

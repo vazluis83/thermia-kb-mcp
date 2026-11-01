@@ -42,6 +42,10 @@ How to use:
   page (e.g. [ELEC p.40] -> source='ELEC', page=40) and get_source_page_text extracts its text. Use them to
   verify a citation or to answer something the knowledge base does not cover.
 - Languages: lang="en" (default) or lang="pt" (European Portuguese).
+Corrections: the knowledge base improves only through reviewed GitHub issues. If the user confirms on their own
+unit (measurement, display reading, or a document with page) that something here is wrong or missing, point them
+to https://github.com/vazluis83/thermia-kb-mcp/issues/new/choose and help them write it up with what they verified
+and how. Do not suggest filing an issue for your own unverified deductions.
 Safety: this is reference data, not authority to work on mains wiring. Advise a qualified electrician for 400 V
 work and never suggest bypassing the pump's safety devices (B1/B2/B3 pressure switches, F11, T1).
 """
